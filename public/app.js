@@ -2,10 +2,10 @@ let contadorActividades = 7;
 const maxActividades = 20;
 
 // 🔐 Debe coincidir con api/config.php
-const API_KEY = "Ser0921*/";
+const API_KEY = "CAMBIA-ESTA-CLAVE-POR-UNA-LARGA-Y-ALEATORIA-1234567890";
 
 document.addEventListener("DOMContentLoaded", () => {
-  // ✅ sincroniza contador con la cantidad real de filas existentes en el HTML
+  // sincroniza contador con filas reales
   const filas = document.querySelectorAll("#lista-actividades tr[data-idx]");
   if (filas && filas.length > 0) contadorActividades = filas.length;
 
@@ -43,6 +43,21 @@ document.addEventListener("DOMContentLoaded", () => {
   otroChk?.addEventListener("change", syncOtro);
   syncOtro();
 });
+
+function esVacio(v) {
+  return !v || !v.toString().trim();
+}
+
+function marcarError(el) {
+  if (!el) return;
+  el.classList.add("border-red-500", "bg-red-50");
+}
+
+function limpiarErrores() {
+  document.querySelectorAll(".border-red-500").forEach(el => {
+    el.classList.remove("border-red-500", "bg-red-50");
+  });
+}
 
 function agregarActividad() {
   if (contadorActividades >= maxActividades) {
@@ -84,10 +99,9 @@ function quitarActividad() {
 }
 
 /**
- * ✅ Lectura robusta:
- * - usa FormData para leer actividad_X y ejecutor_X
- * - cuenta SOLO las actividades con descripción no vacía
- * - tolera filas intermedias en blanco (ej: 1 y 3 llenas, 2 vacía)
+ * Lee actividades desde FormData:
+ * - solo cuenta filas con descripción
+ * - exige ejecutor si existe descripción (lo validamos)
  */
 function leerActividadesDesdeFormData(fd) {
   const actividades = [];
@@ -113,49 +127,130 @@ async function guardarEnBD() {
   if (!form) return alert("No se encontró el formulario (id=form-levantamiento).");
 
   const fd = new FormData(form);
+  limpiarErrores();
 
-  // ✅ Validaciones mínimas
+  const getEl = (name) => document.querySelector(`[name="${name}"]`);
+
+  // Campos obligatorios
   const nombre = (fd.get("nombre_proceso") || "").toString().trim();
   const unidad = (fd.get("unidad_responsable") || "").toString().trim();
+  const objetivo = (fd.get("objetivo_proceso") || "").toString().trim();
+  const resultado = (fd.get("resultado_final") || "").toString().trim();
+  const inicio = (fd.get("evento_inicio") || "").toString().trim();
+  const termino = (fd.get("evento_termino") || "").toString().trim();
+  const actores = (fd.get("actores") || "").toString().trim();
 
-  if (!nombre) return alert("Falta: Nombre del proceso");
-  if (!unidad) return alert("Falta: Unidad responsable");
+  const instExt = (fd.get("instituciones_externas") || "").toString().trim(); // si/no
+  const instExtDet = (fd.get("instituciones_externas_detalle") || "").toString().trim();
 
+  const validacion = (fd.get("validacion") || "").toString().trim(); // si/no
+
+  const fecha = (fd.get("fecha_levantamiento") || "").toString().trim();
+  const unidadPart = (fd.get("unidad_participante") || "").toString().trim();
+  const profesional = (fd.get("profesional_levantamiento") || "").toString().trim();
+
+  const almacenamiento = fd.getAll("almacenamiento");
+  const almacenamientoOtro = (fd.get("almacenamiento_otro") || "").toString().trim();
+
+  // Validaciones (ordenadas)
+  if (esVacio(nombre)) { marcarError(getEl("nombre_proceso")); alert("Falta: Nombre del proceso"); return; }
+  if (esVacio(unidad)) { marcarError(getEl("unidad_responsable")); alert("Falta: Unidad responsable"); return; }
+  if (esVacio(objetivo)) { marcarError(getEl("objetivo_proceso")); alert("Falta: Objetivo del proceso"); return; }
+  if (esVacio(resultado)) { marcarError(getEl("resultado_final")); alert("Falta: Resultado final"); return; }
+  if (esVacio(inicio)) { marcarError(getEl("evento_inicio")); alert("Falta: Evento de inicio"); return; }
+  if (esVacio(termino)) { marcarError(getEl("evento_termino")); alert("Falta: Evento de término"); return; }
+  if (esVacio(actores)) { marcarError(getEl("actores")); alert("Falta: Actores (roles/unidades)"); return; }
+
+  if (!["si", "no"].includes(instExt)) {
+    alert("Falta: Instituciones externas (Sí/No)");
+    return;
+  }
+  if (instExt === "si" && esVacio(instExtDet)) {
+    marcarError(getEl("instituciones_externas_detalle"));
+    alert("Falta: Indicar cuáles instituciones externas participan");
+    return;
+  }
+
+  // Actividades y ejecutor obligatorio
   const actividades = leerActividadesDesdeFormData(fd);
-  if (actividades.length === 0) return alert("Debes ingresar al menos 1 actividad");
+  if (actividades.length === 0) {
+    alert("Debes ingresar al menos 1 actividad");
+    return;
+  }
+  for (const a of actividades) {
+    if (esVacio(a.descripcion)) {
+      marcarError(getEl(`actividad_${a.orden}`));
+      alert(`Falta descripción en Actividad ${a.orden}`);
+      return;
+    }
+    if (esVacio(a.ejecutor)) {
+      marcarError(getEl(`ejecutor_${a.orden}`));
+      alert(`Falta ejecutor (rol/cargo) en Actividad ${a.orden}`);
+      return;
+    }
+  }
 
+  // Almacenamiento al menos 1
+  if (!almacenamiento || almacenamiento.length === 0) {
+    alert("Falta: Selecciona al menos un medio de almacenamiento");
+    return;
+  }
+  if (almacenamiento.includes("otro") && esVacio(almacenamientoOtro)) {
+    marcarError(getEl("almacenamiento_otro"));
+    alert("Falta: Detallar almacenamiento 'Otro'");
+    return;
+  }
+
+  // Validación sí/no
+  if (!["si", "no"].includes(validacion)) {
+    alert("Falta: Validación (Sí/No)");
+    return;
+  }
+
+  // Datos registro
+  if (esVacio(fecha)) { marcarError(getEl("fecha_levantamiento")); alert("Falta: Fecha de levantamiento"); return; }
+  if (esVacio(unidadPart)) { marcarError(getEl("unidad_participante")); alert("Falta: Unidad participante"); return; }
+  if (esVacio(profesional)) { marcarError(getEl("profesional_levantamiento")); alert("Falta: Profesional levantamiento"); return; }
+
+  // Payload
   const payload = {
     nombre_proceso: nombre,
     unidad_responsable: unidad,
-    objetivo_proceso: fd.get("objetivo_proceso"),
-    resultado_final: fd.get("resultado_final"),
-    evento_inicio: fd.get("evento_inicio"),
-    evento_termino: fd.get("evento_termino"),
-    actores: fd.get("actores"),
-    instituciones_externas: fd.get("instituciones_externas"),
-    instituciones_externas_detalle: fd.get("instituciones_externas_detalle"),
+    objetivo_proceso: objetivo,
+    resultado_final: resultado,
+    evento_inicio: inicio,
+    evento_termino: termino,
+    actores,
+
+    instituciones_externas: instExt,
+    instituciones_externas_detalle: instExtDet,
+
     docs_inicio: fd.get("docs_inicio"),
     docs_durante: fd.get("docs_durante"),
     momento_expediente: fd.get("momento_expediente"),
-    almacenamiento: fd.getAll("almacenamiento"),
-    almacenamiento_otro: fd.get("almacenamiento_otro"),
+
+    almacenamiento,
+    almacenamiento_otro: almacenamientoOtro,
+
     problemas: fd.get("problemas"),
     etapas_criticas: fd.get("etapas_criticas"),
-    validacion: fd.get("validacion"),
+
+    validacion,
     obs_adicionales: fd.get("obs_adicionales"),
-    fecha_levantamiento: fd.get("fecha_levantamiento"),
-    unidad_participante: fd.get("unidad_participante"),
-    profesional_levantamiento: fd.get("profesional_levantamiento"),
+
+    fecha_levantamiento: fecha,
+    unidad_participante: unidadPart,
+    profesional_levantamiento: profesional,
     contacto_validacion: fd.get("contacto_validacion"),
+
     actividades
   };
 
-  // ⚠️ RUTA (ajústala según dónde esté tu formulario):
-  // - si está en /formulario/ => "../api/save_proceso.php"
-  // - si está en la raíz / => "api/save_proceso.php"
+  // ⚠️ RUTA:
+  // - si el formulario está en /formulario/ => "../api/save_proceso.php"
+  // - si el formulario está en la raíz / => "api/save_proceso.php"
   const url = "../api/save_proceso.php";
 
-  // Bloqueo anti doble click
   const btn = document.getElementById("btn-guardar");
   if (btn) btn.disabled = true;
 
@@ -171,8 +266,9 @@ async function guardarEnBD() {
 
     const data = await resp.json().catch(() => ({}));
 
-    if (resp.ok && data.ok) alert("Guardado ✅ ID: " + data.id);
-    else {
+    if (resp.ok && data.ok) {
+      alert("Guardado ✅ ID: " + data.id);
+    } else {
       alert("Error al guardar. Revisa consola.");
       console.error(data);
     }
