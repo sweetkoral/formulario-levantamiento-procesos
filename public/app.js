@@ -2,7 +2,7 @@ let contadorActividades = 7;
 const maxActividades = 20;
 
 // 🔐 Debe coincidir con api/config.php
-const API_KEY = "CAMBIA-ESTA-CLAVE-POR-UNA-LARGA-Y-ALEATORIA-1234567890";
+const API_KEY = "Ser0921*/";
 
 document.addEventListener("DOMContentLoaded", () => {
   // sincroniza contador con filas reales
