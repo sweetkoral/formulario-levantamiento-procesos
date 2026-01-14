@@ -4,9 +4,16 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 
 $DB_HOST = 'localhost';
+
+// LOCAL (XAMPP): tu base actual
 $DB_NAME = 'procesos-mtocopila';
 $DB_USER = 'root';
 $DB_PASS = '';
+
+// PRODUCCIÓN (cPanel): ejemplo (descomenta y cambia)
+// $DB_NAME = 'usuario_procesos';
+// $DB_USER = 'usuario_userdb';
+// $DB_PASS = 'PASSWORD_AQUI';
 
 try {
   $pdo = new PDO(

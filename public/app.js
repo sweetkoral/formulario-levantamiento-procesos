@@ -1,16 +1,18 @@
 let contadorActividades = 7;
-const maxActividades = 15;
+const maxActividades = 20;
+
+// 🔐 Debe coincidir con api/config.php
+const API_KEY = "Ser0921*/";
 
 document.addEventListener("DOMContentLoaded", () => {
-  const btnGuardar = document.getElementById("btn-guardar");
-  const btnImprimir = document.getElementById("btn-imprimir");
-  const btnAdd = document.getElementById("btn-add-actividad");
-  const btnRemove = document.getElementById("btn-remove-actividad");
+  // ✅ sincroniza contador con la cantidad real de filas existentes en el HTML
+  const filas = document.querySelectorAll("#lista-actividades tr[data-idx]");
+  if (filas && filas.length > 0) contadorActividades = filas.length;
 
-  if (btnGuardar) btnGuardar.addEventListener("click", guardarEnBD);
-  if (btnImprimir) btnImprimir.addEventListener("click", () => window.print());
-  if (btnAdd) btnAdd.addEventListener("click", agregarActividad);
-  if (btnRemove) btnRemove.addEventListener("click", quitarActividad);
+  document.getElementById("btn-guardar")?.addEventListener("click", guardarEnBD);
+  document.getElementById("btn-imprimir")?.addEventListener("click", () => window.print());
+  document.getElementById("btn-add-actividad")?.addEventListener("click", agregarActividad);
+  document.getElementById("btn-remove-actividad")?.addEventListener("click", quitarActividad);
 
   // UX: instituciones externas detalle
   const radiosExt = document.querySelectorAll('input[name="instituciones_externas"]');
@@ -38,27 +40,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!enable) otroTxt.value = "";
     }
   }
-  if (otroChk) otroChk.addEventListener("change", syncOtro);
+  otroChk?.addEventListener("change", syncOtro);
   syncOtro();
 });
-
-function crearFilaActividad(idx) {
-  const row = document.createElement("div");
-  row.className = "grid grid-cols-12 gap-3 items-start";
-  row.setAttribute("data-idx", String(idx));
-
-  row.innerHTML = `
-    <div class="col-span-7">
-      <input name="actividad_desc_${idx}" type="text" placeholder="Actividad ${idx}"
-        class="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"/>
-    </div>
-    <div class="col-span-5">
-      <input name="actividad_ejec_${idx}" type="text" placeholder="Ejecutor / Rol"
-        class="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"/>
-    </div>
-  `;
-  return row;
-}
 
 function agregarActividad() {
   if (contadorActividades >= maxActividades) {
@@ -67,45 +51,82 @@ function agregarActividad() {
   }
   contadorActividades++;
 
-  const cont = document.getElementById("lista-actividades");
-  if (!cont) return;
+  const tbody = document.getElementById("lista-actividades");
+  if (!tbody) return;
 
-  cont.appendChild(crearFilaActividad(contadorActividades));
+  const tr = document.createElement("tr");
+  tr.setAttribute("data-idx", String(contadorActividades));
+  tr.className = "border-t border-slate-200";
+
+  tr.innerHTML = `
+    <td class="px-3 py-2 text-slate-600">${contadorActividades}</td>
+    <td class="px-3 py-2">
+      <input type="text" name="actividad_${contadorActividades}" placeholder="Actividad ${contadorActividades}"
+        class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-300" />
+    </td>
+    <td class="px-3 py-2">
+      <input type="text" name="ejecutor_${contadorActividades}" placeholder="Rol/cargo"
+        class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-300" />
+    </td>
+  `;
+
+  tbody.appendChild(tr);
 }
 
 function quitarActividad() {
-  const cont = document.getElementById("lista-actividades");
-  if (!cont) return;
+  const tbody = document.getElementById("lista-actividades");
+  if (!tbody) return;
 
   if (contadorActividades <= 1) return;
 
-  cont.removeChild(cont.lastElementChild);
+  tbody.removeChild(tbody.lastElementChild);
   contadorActividades--;
+}
+
+/**
+ * ✅ Lectura robusta:
+ * - usa FormData para leer actividad_X y ejecutor_X
+ * - cuenta SOLO las actividades con descripción no vacía
+ * - tolera filas intermedias en blanco (ej: 1 y 3 llenas, 2 vacía)
+ */
+function leerActividadesDesdeFormData(fd) {
+  const actividades = [];
+
+  for (let i = 1; i <= contadorActividades; i++) {
+    const desc = (fd.get(`actividad_${i}`) || "").toString().trim();
+    const ejec = (fd.get(`ejecutor_${i}`) || "").toString().trim();
+
+    if (desc) {
+      actividades.push({
+        orden: i,
+        descripcion: desc,
+        ejecutor: ejec || null
+      });
+    }
+  }
+
+  return actividades;
 }
 
 async function guardarEnBD() {
   const form = document.getElementById("form-levantamiento");
-  if (!form) {
-    alert("No se encontró el formulario (id=form-levantamiento).");
-    return;
-  }
+  if (!form) return alert("No se encontró el formulario (id=form-levantamiento).");
 
   const fd = new FormData(form);
 
-  // Recolectar actividades como array de objetos
-  const actividades = [];
-  for (let i = 1; i <= contadorActividades; i++) {
-    const desc = (fd.get(`actividad_desc_${i}`) || "").toString().trim();
-    const ejec = (fd.get(`actividad_ejec_${i}`) || "").toString().trim();
+  // ✅ Validaciones mínimas
+  const nombre = (fd.get("nombre_proceso") || "").toString().trim();
+  const unidad = (fd.get("unidad_responsable") || "").toString().trim();
 
-    if (desc) {
-      actividades.push({ descripcion: desc, ejecutor: ejec || null });
-    }
-  }
+  if (!nombre) return alert("Falta: Nombre del proceso");
+  if (!unidad) return alert("Falta: Unidad responsable");
+
+  const actividades = leerActividadesDesdeFormData(fd);
+  if (actividades.length === 0) return alert("Debes ingresar al menos 1 actividad");
 
   const payload = {
-    nombre_proceso: fd.get("nombre_proceso"),
-    unidad_responsable: fd.get("unidad_responsable"),
+    nombre_proceso: nombre,
+    unidad_responsable: unidad,
     objetivo_proceso: fd.get("objetivo_proceso"),
     resultado_final: fd.get("resultado_final"),
     evento_inicio: fd.get("evento_inicio"),
@@ -129,20 +150,33 @@ async function guardarEnBD() {
     actividades
   };
 
-  // LOCAL XAMPP (desde /public/ hacia /api/)
+  // ⚠️ RUTA (ajústala según dónde esté tu formulario):
+  // - si está en /formulario/ => "../api/save_proceso.php"
+  // - si está en la raíz / => "api/save_proceso.php"
   const url = "../api/save_proceso.php";
 
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  // Bloqueo anti doble click
+  const btn = document.getElementById("btn-guardar");
+  if (btn) btn.disabled = true;
 
-  const data = await resp.json().catch(() => ({}));
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": API_KEY
+      },
+      body: JSON.stringify(payload)
+    });
 
-  if (resp.ok && data.ok) alert("Guardado ✅ ID: " + data.id);
-  else {
-    alert("Error al guardar. Revisa la consola.");
-    console.error(data);
+    const data = await resp.json().catch(() => ({}));
+
+    if (resp.ok && data.ok) alert("Guardado ✅ ID: " + data.id);
+    else {
+      alert("Error al guardar. Revisa consola.");
+      console.error(data);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }

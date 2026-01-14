@@ -1,8 +1,15 @@
 <?php
 declare(strict_types=1);
 
+require __DIR__ . '/config.php';
 require __DIR__ . '/db.php';
 
+/** CORS (solo si corresponde) */
+if (ENABLE_CORS && APP_ENV === 'production') {
+  header("Access-Control-Allow-Origin: " . ALLOWED_ORIGIN);
+  header("Access-Control-Allow-Headers: Content-Type, X-API-KEY");
+  header("Access-Control-Allow-Methods: POST, OPTIONS");
+}
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') exit;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -11,9 +18,36 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
   exit;
 }
 
-$raw = file_get_contents('php://input');
-$data = json_decode($raw, true);
+/** API KEY */
+$clientKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
+if (!hash_equals(API_KEY, $clientKey)) {
+  http_response_code(401);
+  echo json_encode(['ok' => false, 'error' => 'Unauthorized']);
+  exit;
+}
 
+/** Rate limit por sesión (anti spam básico) */
+session_start();
+$now = time();
+$_SESSION['hits'] = $_SESSION['hits'] ?? [];
+$_SESSION['hits'] = array_filter($_SESSION['hits'], fn($t) => $t > $now - 60);
+
+if (count($_SESSION['hits']) >= RATE_LIMIT_PER_MIN) {
+  http_response_code(429);
+  echo json_encode(['ok'=>false,'error'=>'Too Many Requests']);
+  exit;
+}
+$_SESSION['hits'][] = $now;
+
+/** Payload size limit */
+$raw = file_get_contents('php://input');
+if (strlen($raw) > 300000) { // 300 KB
+  http_response_code(413);
+  echo json_encode(['ok' => false, 'error' => 'Payload too large']);
+  exit;
+}
+
+$data = json_decode($raw, true);
 if (!is_array($data)) {
   http_response_code(400);
   echo json_encode(['ok' => false, 'error' => 'Invalid JSON']);
@@ -25,6 +59,14 @@ function s($v, $max = 100000) {
   $t = trim((string)$v);
   if ($t === '') return null;
   return mb_substr($t, 0, $max);
+}
+
+$nombre = s($data['nombre_proceso'] ?? null, 255);
+$unidad = s($data['unidad_responsable'] ?? null, 255);
+if ($nombre === null || $unidad === null) {
+  http_response_code(400);
+  echo json_encode(['ok'=>false,'error'=>'Faltan campos obligatorios (nombre_proceso, unidad_responsable)']);
+  exit;
 }
 
 $actividades = $data['actividades'] ?? [];
@@ -58,8 +100,8 @@ try {
   ");
 
   $stmt->execute([
-    ':nombre_proceso' => s($data['nombre_proceso'] ?? null, 255),
-    ':unidad_responsable' => s($data['unidad_responsable'] ?? null, 255),
+    ':nombre_proceso' => $nombre,
+    ':unidad_responsable' => $unidad,
     ':objetivo_proceso' => s($data['objetivo_proceso'] ?? null),
     ':resultado_final' => s($data['resultado_final'] ?? null),
     ':evento_inicio' => s($data['evento_inicio'] ?? null),
@@ -89,30 +131,30 @@ try {
 
   $procesoId = (int)$pdo->lastInsertId();
 
-  // actividades ahora: array de objetos { descripcion, ejecutor }
   $stmtAct = $pdo->prepare("
     INSERT INTO actividades (proceso_id, orden, descripcion, ejecutor)
-    VALUES (:pid, :ord, :desc, :ej)
+    VALUES (:pid, :ord, :desc, :ejec)
   ");
 
-  $orden = 1;
+  $count = 0;
   foreach ($actividades as $a) {
     if (!is_array($a)) continue;
 
+    $ord = (int)($a['orden'] ?? 0);
     $desc = s($a['descripcion'] ?? null, 500);
-    $ej = s($a['ejecutor'] ?? null, 255);
+    $ejec = s($a['ejecutor'] ?? null, 255);
 
-    if ($desc === null) continue;
+    if ($ord <= 0 || $desc === null) continue;
 
     $stmtAct->execute([
       ':pid' => $procesoId,
-      ':ord' => $orden,
+      ':ord' => $ord,
       ':desc' => $desc,
-      ':ej' => $ej
+      ':ejec' => $ejec,
     ]);
 
-    $orden++;
-    if ($orden > 50) break;
+    $count++;
+    if ($count >= 50) break;
   }
 
   $pdo->commit();
